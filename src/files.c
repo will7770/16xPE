@@ -1,11 +1,15 @@
 #include "files.h"
 #include <stdio.h>
+#include <assert.h>
 
-void get_file_map(const wchar_t *filename, FileMap *fm, bool open_w_nullterm) {
-    DWORD file_flags, mapping_flags, view_flags;
 
-    file_flags = GENERIC_READ;
-    if (open_w_nullterm) { file_flags |= GENERIC_WRITE; }
+void get_file(const wchar_t *filename, FileMap *fm, char mode, bool open_w_nullterm) {
+    assert(mode == 'r' || mode == 'w');
+
+    DWORD file_flags;
+    // file_flags = mode == 'r' ? GENERIC_READ : GENERIC_WRITE;
+    // if (open_w_nullterm) { file_flags |= GENERIC_WRITE; }
+    file_flags = GENERIC_READ | GENERIC_WRITE;
 
     HANDLE fd = CreateFileW(
         filename,
@@ -25,43 +29,22 @@ void get_file_map(const wchar_t *filename, FileMap *fm, bool open_w_nullterm) {
     LARGE_INTEGER filesize;
     GetFileSizeEx(fd, &filesize);
 
-    if (open_w_nullterm) {
-        mapping_flags = PAGE_READWRITE;
-        view_flags = FILE_MAP_COPY;
-    }
-    else {
-        mapping_flags = PAGE_READONLY;
-        view_flags = FILE_MAP_READ;
+    char *map = NULL;
+    if (open_w_nullterm) { 
+        filesize.QuadPart++;
+        map = malloc(filesize.QuadPart);
+        map[filesize.QuadPart-1] = '\0';
     }
 
-    HANDLE filemap = CreateFileMappingW(
-        fd,
-        NULL,
-        mapping_flags,
-        filesize.HighPart,
-        filesize.LowPart,
-        NULL
-    );
+    DWORD read;
+    ReadFile(fd, map, filesize.QuadPart, &read, NULL);
 
-    if (filemap == NULL) {
-        DWORD dwError = GetLastError();
-        wprintf(L"File could not be mapped. Error code: 0x%X\n", dwError);
-        CloseHandle(fd);
-        return;
-    }
-
-    // will fail horribly if file size is divisible by page size. lets hope it isnt
-    char* map = (char*)MapViewOfFile(filemap, view_flags, 0, 0, 0);
-    if (open_w_nullterm) {
-        *(map+filesize.QuadPart) = '\0';
-    }
-
-    fm->fd = fd; fm->filemap = filemap; fm->map = map; fm->mapsize = filesize.QuadPart;
+    fm->fd = fd; fm->map = map; fm->mapsize = filesize.QuadPart;
 }
 
 
-void close_file_map(FileMap *fm) {
-    UnmapViewOfFile(fm->map);
-    CloseHandle(fm->filemap);
+
+void close_file(FileMap *fm) {
+    free(fm->map);
     CloseHandle(fm->fd);
 }

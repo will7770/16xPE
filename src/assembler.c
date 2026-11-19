@@ -44,6 +44,9 @@ typedef struct {
     int instr_tpl_step;
 
     int current_line;
+
+    unsigned short instr_buffer;
+    bool should_write;
 } ParserContext;
 
 
@@ -122,7 +125,7 @@ void stage_finish(ParserContext *ctx, Token *tk);
 
 void assemble(const wchar_t *filename) {
     FileMap source;
-    get_file_map(filename, &source, true);
+    get_file(filename, &source, 'r', true);
 
     char *cursor = source.map;
     ParserContext ctx = {0};
@@ -145,6 +148,8 @@ void assemble(const wchar_t *filename) {
             stage_instr_fetch(&ctx, &tk);
             break;
 
+            default:
+            break;
             // case ST_FINISH:
             // stage_finish(&ctx, &tk);
             // break;
@@ -158,7 +163,7 @@ void assemble(const wchar_t *filename) {
         printf("File assembly failed due to the error above.\n");
     }
 
-    close_file_map(&source);
+    close_file(&source);
 }
 
 

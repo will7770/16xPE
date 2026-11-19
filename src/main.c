@@ -6,6 +6,6 @@
 
 extern char *MEMORY;
 
-int main(void) {
-    assemble(L"test.txt");
+int main(int argc, const char *argv[]) {
+    assemble(L"test.asm");
 }

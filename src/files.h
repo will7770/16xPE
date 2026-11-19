@@ -4,12 +4,11 @@
 
 typedef struct {
     HANDLE fd;
-    HANDLE filemap;
     char* map;
     long long mapsize;
 } FileMap;
 
 
-void get_file_map(const wchar_t *filename, FileMap *fm, bool open_w_nullterm);
+void get_file(const wchar_t *filename, FileMap *fm, char mode, bool open_w_nullterm);
 
-void close_file_map(FileMap *fm);
+void close_file(FileMap *fm);

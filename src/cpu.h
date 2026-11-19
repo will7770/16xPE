@@ -4,12 +4,12 @@
 
 
 typedef struct {
-    uint32_t PC;
-    uint32_t reg_file[8];
+    unsigned short PC;
+    unsigned short reg_file[7];
 } CPU;
 
 
 typedef struct {
     CPU cpu;
-    uint8_t *memory;
+    char *memory;
 } Emulator;

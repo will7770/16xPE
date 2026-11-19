@@ -10,4 +10,4 @@ typedef enum {
 } INSTR;
 
 
-typedef void (*exec_func)(uint32_t PC);
+typedef void (*exec_func)(unsigned short PC);
