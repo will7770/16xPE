@@ -20,6 +20,7 @@ typedef enum {
     TK_REGISTER,
     TK_IMMEDIATE,
     TK_NEWLINE,
+    TK_COMMA,
     TK_END,
     TK_BULLSHIT,
 } TOKENTYPE;
@@ -32,8 +33,8 @@ struct instr_metadata {
 };
 
 static const struct instr_metadata instr_md_table[INSTR_END] = {
-    [ADDI] = { "addi", { TK_REGISTER, TK_IMMEDIATE, TK_NEWLINE }, 3 },
-    [ADD] = { "add", { TK_REGISTER, TK_REGISTER, TK_NEWLINE }, 3 }
+    [ADDI] = { "addi", { TK_REGISTER, TK_COMMA, TK_IMMEDIATE, TK_NEWLINE }, 4 },
+    [ADD] = { "add", { TK_REGISTER, TK_COMMA, TK_REGISTER, TK_NEWLINE }, 4 }
 };
 
 
@@ -44,6 +45,7 @@ typedef struct {
     int instr_tpl_step;
 
     int current_line;
+    int current_column;
 
     unsigned short instr_buffer;
     bool should_write;
@@ -57,6 +59,8 @@ typedef struct {
         int imm;
         INSTR instr_type;
     };
+
+    int length;
 } Token;
 
 
@@ -67,7 +71,15 @@ Token get_token(char **cursor) {
     token.type = TK_BULLSHIT;
 
     for (;;work_mem++) {
-        if (*work_mem != ' ' && *work_mem != ',') {
+        if (*work_mem != ' ') {
+            break;
+        }
+    }
+
+    token.length = 1;
+    for (;;token.length++) {
+        char symbol = work_mem[token.length];
+        if (isspace(symbol) || symbol == '\0' || symbol == ',') {
             break;
         }
     }
@@ -79,42 +91,42 @@ Token get_token(char **cursor) {
         return token;
     }
 
-    char potential_reg_number = *(work_mem+1);
 
-    if (symbol == '\r' && potential_reg_number == '\n') {
+    char lookahead = *(work_mem+1);
+    if (symbol == ',') {
+        token.type = TK_COMMA;
+    }
+    else if (symbol == '\r' && lookahead == '\n') {
         token.type = TK_NEWLINE;
-        work_mem += 2;
+        token.length++;
     }
     // regs
-    else if ((symbol == 'x' || symbol == 'X') && (potential_reg_number >= '0' && potential_reg_number <= '8')) {
+    else if ((token.length == 2) && (symbol == 'x' || symbol == 'X') && (lookahead >= '0' && lookahead <= '8')) {
         token.type = TK_REGISTER;
-        token.reg_number = potential_reg_number - '0';
-        work_mem += 2;
+        token.reg_number = lookahead - '0';
     }
     // immediate values 
     else if (symbol >= '0' && symbol <= '9') {
         char *bad_addr;
         int tmp = (int)strtol(work_mem, &bad_addr, 0);
-        if (bad_addr != work_mem || isspace(*bad_addr)) {
+        if (bad_addr != work_mem && isspace(*bad_addr)) {
             token.type = TK_IMMEDIATE;
             token.imm = tmp;
-            work_mem += (bad_addr - work_mem);
         }
     }
     // probably an instruction then
     else {
         for (int i = 0; i < INSTR_END; i++) {
             int len = strlen(instr_md_table[i].name);
-            if (strncmp(work_mem, instr_md_table[i].name, len) == 0) {
+            if (len == token.length && strncmp(work_mem, instr_md_table[i].name, token.length) == 0) {
                 token.type = TK_INSTRUCTION;
                 token.instr_type = i;
-                work_mem += len;
                 break;
             }
         }
     }
 
-    *cursor = work_mem;
+    *cursor = work_mem + token.length;
     return token;
 }
 
@@ -129,14 +141,17 @@ void assemble(const wchar_t *filename) {
 
     char *cursor = source.map;
     ParserContext ctx = {0};
+    ctx.stage = ST_FREE;
     ctx.current_line = 1;
+    ctx.current_column = 1;
 
     while (ctx.stage != ST_FINISH && ctx.stage != ST_ERROR) {
         Token tk = get_token(&cursor);
+        ctx.current_column += tk.length;
 
-        if (tk.type == TK_END) {
-            ctx.stage = ST_FINISH;
-            break;
+        if (tk.type == TK_NEWLINE) {
+            ctx.current_column = 1;
+            ctx.current_line++;
         }
 
         switch (ctx.stage) {
@@ -157,7 +172,7 @@ void assemble(const wchar_t *filename) {
 
     }
     if (ctx.stage == ST_FINISH) {
-        printf("File assembled successfully. Lines read: %d\n", ctx.current_line);
+        printf("File assembled successfully. Lines read: %d:%d\n", ctx.current_line, ctx.current_column);
     }
     else {
         printf("File assembly failed due to the error above.\n");
@@ -173,12 +188,12 @@ void stage_free(ParserContext *ctx, Token *tk) {
         ctx->target_instr = tk->instr_type;
         ctx->instr_tpl_step = 0;
     }
-    else if (tk->type == TK_NEWLINE) {
-        ctx->current_line++;
+    else if (tk->type == TK_END) {
+        ctx->stage = ST_FINISH;
     }
-    else {
+    else if (tk->type == TK_BULLSHIT) {
         ctx->stage = ST_ERROR;
-        printf("Unidentified symbol at line %d\n", ctx->current_line);
+        printf("Unidentified symbol at line %d:%d\n", ctx->current_line, ctx->current_column);
     }
 }
 
@@ -186,18 +201,18 @@ void stage_free(ParserContext *ctx, Token *tk) {
 void stage_instr_fetch(ParserContext *ctx, Token *tk) {
     const struct instr_metadata *md = &instr_md_table[ctx->target_instr];
 
-    tk->type = tk->type == TK_END? TK_NEWLINE : tk->type;
+    bool last_instr = tk->type == TK_END? true : false;
+    tk->type = last_instr? TK_NEWLINE : tk->type;
 
     if (tk->type == md->template[ctx->instr_tpl_step]) {
         ctx->instr_tpl_step++;
+        printf("%d ", tk->type);
         if (ctx->instr_tpl_step == md->template_len) {
-            ctx->current_line++;
-            ctx->stage = ST_FREE;
-            // TODO: introduce a 32 bit instruction buffer and write data to it
+            ctx->stage = last_instr? ST_FINISH : ST_FREE;
         }
         return;
     }
-    printf("Instruction syntax error at line %d\n", ctx->current_line);
+    printf("Instruction syntax error at line %d:%d\n", ctx->current_line, ctx->current_column);
     ctx->stage = ST_ERROR;
 }
 
