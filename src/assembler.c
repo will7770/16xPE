@@ -39,20 +39,6 @@ static const struct instr_metadata instr_md_table[INSTR_END] = {
 
 
 typedef struct {
-    PARSE_STAGE stage;
-
-    INSTR target_instr;
-    int instr_tpl_step;
-
-    int current_line;
-    int current_column;
-
-    unsigned short instr_buffer;
-    bool should_write;
-} ParserContext;
-
-
-typedef struct {
     TOKENTYPE type;
     union {
         int reg_number;
@@ -62,6 +48,24 @@ typedef struct {
 
     int length;
 } Token;
+
+
+
+typedef struct {
+    FileMap source, dest;
+
+    PARSE_STAGE stage;
+
+    INSTR target_instr;
+    int instr_tpl_step;
+
+    int current_line;
+    int current_column;
+
+    unsigned short instr_buffer;
+    Token context_tokens[6];
+    int context_tk_length;
+} ParserContext;
 
 
 
@@ -134,13 +138,16 @@ Token get_token(char **cursor) {
 void stage_free(ParserContext *ctx, Token *tk);
 void stage_instr_fetch(ParserContext *ctx, Token *tk);
 void stage_finish(ParserContext *ctx, Token *tk);
+void make_instruction_binary(ParserContext *ctx);
 
 void assemble(const wchar_t *filename) {
-    FileMap source;
-    get_file(filename, &source, 'r', true);
-
-    char *cursor = source.map;
     ParserContext ctx = {0};
+
+    get_file(filename, &ctx.source, 'r', true);
+    get_file(L"result.bin", &ctx.dest, 'w', false);
+
+    char *cursor = ctx.source.map;
+
     ctx.stage = ST_FREE;
     ctx.current_line = 1;
     ctx.current_column = 1;
@@ -178,7 +185,8 @@ void assemble(const wchar_t *filename) {
         printf("File assembly failed due to the error above.\n");
     }
 
-    close_file(&source);
+    close_file(&ctx.source);
+    close_file(&ctx.dest);
 }
 
 
@@ -187,6 +195,7 @@ void stage_free(ParserContext *ctx, Token *tk) {
         ctx->stage = ST_INSTR_FETCH;
         ctx->target_instr = tk->instr_type;
         ctx->instr_tpl_step = 0;
+        ctx->context_tk_length = 0;
     }
     else if (tk->type == TK_END) {
         ctx->stage = ST_FINISH;
@@ -205,10 +214,12 @@ void stage_instr_fetch(ParserContext *ctx, Token *tk) {
     tk->type = last_instr? TK_NEWLINE : tk->type;
 
     if (tk->type == md->template[ctx->instr_tpl_step]) {
+        ctx->context_tokens[ctx->instr_tpl_step] = *tk;
         ctx->instr_tpl_step++;
-        printf("%d ", tk->type);
+
         if (ctx->instr_tpl_step == md->template_len) {
             ctx->stage = last_instr? ST_FINISH : ST_FREE;
+            make_instruction_binary(ctx);
         }
         return;
     }
@@ -219,4 +230,36 @@ void stage_instr_fetch(ParserContext *ctx, Token *tk) {
 
 void stage_finish(ParserContext *ctx, Token *tk) {
 
+}
+
+
+void make_instruction_binary(ParserContext *ctx) {
+    unsigned short buffer = 0;
+    unsigned char bits_remaining = 16;
+
+    bits_remaining -= 4;
+    buffer |= (ctx->target_instr << bits_remaining);
+
+    for (int i = 0; i < ctx->instr_tpl_step; i++) {
+        Token *tok = &ctx->context_tokens[i];
+        switch (tok->type) {
+            case TK_REGISTER:
+            bits_remaining -= 3;
+            buffer |= (tok->reg_number << bits_remaining);
+            break;
+
+            case TK_IMMEDIATE:
+            char num_bit_cnt = 32 - __builtin_clz(tok->imm);
+            if (num_bit_cnt - bits_remaining > 0) {
+                tok->imm >>= num_bit_cnt - bits_remaining;
+            }
+            buffer |= tok->imm;
+            bits_remaining = 0;
+            break;
+
+            default:
+            break;
+        }
+    }
+    write_to_file(&ctx->dest, (char*)&buffer, sizeof(unsigned short));
 }

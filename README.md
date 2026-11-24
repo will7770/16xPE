@@ -9,7 +9,7 @@ Things i want to get done with:
 1. ~~Reading files~~
 2. ~~Making tokens from characters~~
 3. ~~Checking token grammar against instruction templates~~
-4. Translating read data into bits
+4. ~~Translating read data into bits~~
 5. Proper **(basic)** instruction set
 6. Mapping bits to respective instructions
 7. Instruction execution
